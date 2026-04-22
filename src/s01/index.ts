@@ -1,3 +1,14 @@
+// 注意，这是基于anthropic的api来进行设计的，openai的api调用、模型出入参都会不一样
+// # Harness: tool dispatch -- expanding what the model can reach.
+    // +----------+      +-------+      +------------------+
+    // |   User   | ---> |  LLM  | ---> | Tool Dispatch    |
+    // |  prompt  |      |       |      | {                |
+    // +----------+      +---+---+      |   bash: run_bash |
+    //                       ^          |   read: run_read |
+    //                       |          |   write: run_wr  |
+    //                       +----------+   edit: run_edit |
+    //                       tool_result| }                |
+    //                                  +------------------+
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { exec } from "node:child_process";
@@ -75,6 +86,8 @@ async function runOneTurn(messages: Message[]): Promise<boolean> {
     role: "assistant",
     content: response.content,
   });
+
+  console.log('llm return', response);
 
   if (response.stop_reason !== "tool_use") {
     return false;
