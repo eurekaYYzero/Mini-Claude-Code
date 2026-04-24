@@ -1,13 +1,20 @@
-// Harness: tool dispatch -- expanding what the model can reach.
-// +----------+      +-------+      +------------------+
-// |   User   | ---> |  LLM  | ---> | Tool Dispatch    |
-// |  prompt  |      |       |      | {                |
-// +----------+      +---+---+      |   bash: run_bash |
-//                       ^          |   read: run_read |
-//                       |          |   write: run_wr  |
-//                       +----------+   edit: run_edit |
-//                       tool_result| }                |
-//                                  +------------------+
+// # Harness: context isolation -- protecting the model's clarity of thought.
+// Parent agent                     Subagent
+//     +------------------+             +------------------+
+//     | messages=[...]   |             | messages=[]      |  <-- fresh
+//     |                  |  dispatch   |                  |
+//     | tool: task       | ---------->| while tool_use:  |
+//     |   prompt="..."   |            |   call tools     |
+//     |   description="" |            |   append results |
+//     |                  |  summary   |                  |
+//     |   result = "..." | <--------- | return last text |
+//     +------------------+             +------------------+
+//               |
+//     Parent context stays clean.
+//     Subagent context is discarded.
+
+// Key insight: "Process isolation gives context isolation for free."
+
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { exec } from "node:child_process";
@@ -27,13 +34,16 @@ const client = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL,
 });
 const MODEL = process.env.MODEL_ID!;
-const SYSTEM = `You are a coding agent at ${process.cwd()}. Use bash to inspect and change the workspace.`;
+const SYSTEM = `You are a coding agent at ${process.cwd()}. Use the task tool to delegate exploration or subtasks.`
+const SUBAGENT_SYSTEM = `You are a coding subagent at ${process.cwd()}. Complete the given task, then summarize your findings.`
+
 
 type Message = {
   role: "user" | "assistant";
   content: any;
 };
 
+// -- Tool implementations --
 function safePath(p:string) {
   const resolved = path.resolve(WORKDIR, p);
   const workspace = path.resolve(WORKDIR);
@@ -103,6 +113,14 @@ async function runBash(command: string): Promise<string> {
   }
 }
 
+type ToolHandler = (input: any) => Promise<string>;
+const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  bash: ({ command }) => runBash(command),
+  read_file: ({ path, limit }) => runRead(path, limit),
+  write_file: ({ path, content }) => runWrite(path, content),
+  edit_file: ({ path, old_text, new_text }) => runEdit(path, old_text, new_text),
+};
+
 function extractText(content: any): string {
   if (!Array.isArray(content)) return "";
 
@@ -115,7 +133,8 @@ function extractText(content: any): string {
   return texts.join("\n").trim();
 }
 
-const TOOLS = [
+// # Child gets all base tools except task (no recursive spawning)
+const CHILD_TOOLS = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "read_file", "description": "Read file contents.",
@@ -126,22 +145,86 @@ const TOOLS = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
 ]
 
-type ToolHandler = (input: any) => Promise<string>;
-const TOOL_HANDLERS: Record<string, ToolHandler> = {
-  bash: ({ command }) => runBash(command),
-  read_file: ({ path, limit }) => runRead(path, limit),
-  write_file: ({ path, content }) => runWrite(path, content),
-  edit_file: ({ path, old_text, new_text }) => runEdit(path, old_text, new_text),
-};
+async function runSubagent(prompt:string) {
+  const subMessages:Message[] = [{ role: "user", content: prompt }]; // fresh context
+
+  let response:any;
+
+  for (let i = 0; i < 30; i++) {
+    response = await client.messages.create({
+      model: MODEL,
+      system: SUBAGENT_SYSTEM,
+      messages: subMessages,
+      tools: CHILD_TOOLS as any,
+      max_tokens: 8000,
+    });
+
+    subMessages.push({ role: "assistant", content: response.content });
+
+    if (response.stop_reason !== "tool_use") {
+      break;
+    }
+
+    const results = [];
+
+    for (const block of response.content) {
+      if (block.type === "tool_use") {
+        const handler = TOOL_HANDLERS[block.name];
+        const output = handler
+          ? await handler(block.input)
+          : `Unknown tool: ${block.name}`;
+
+        results.push({
+          type: "tool_result",
+          tool_use_id: block.id,
+          content: String(output).slice(0, 50000),
+        });
+      }
+    }
+
+    subMessages.push({ role: "user", content: results });
+  }
+
+  // Only the final text returns to the parent -- child context is discarded
+  return (
+    response.content
+      .filter((b) => "text" in b)
+      .map((b) => b.text)
+      .join("") || "(no summary)"
+  );
+}
+
+// -- Parent tools: base tools + task dispatcher --
+const PARENT_TOOLS = [
+  ...CHILD_TOOLS,
+  {
+    name: "task",
+    description:
+      "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
+    input_schema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        description: {
+          type: "string",
+          description: "Short description of the task",
+        },
+      },
+      required: ["prompt"],
+    },
+  },
+];
 
 
+
+// -- Agent loop --
 async function runOneTurn(messages: Message[]): Promise<boolean> {
   const response = await client.messages.create({
     model: MODEL,
     system: SYSTEM,
     messages: messages as any,
-    tools: TOOLS as any,
-    max_tokens: 2000,
+    tools: PARENT_TOOLS as any,
+    max_tokens: 8000,
   });
 
   messages.push({
@@ -149,18 +232,35 @@ async function runOneTurn(messages: Message[]): Promise<boolean> {
     content: response.content,
   });
 
-  console.log('llm return', response);
-
-  if (response.stop_reason !== "tool_use") {
-    return false;
+  if(response.stop_reason !== "tool_use"){
+    return false
   }
+
+  console.log('llm return', response.content);
 
   const results: any[] = [];
 
+
   for (const block of response.content) {
+    let output = ''
     if (block.type === "tool_use") {
-      const handler = TOOL_HANDLERS[block.name]
-      const output = handler ? await handler(block.input) : `Unknown tool: ${block.name}`;
+
+      if(block.name === "task"){
+        const desc = block.input?.description ?? "subtask";
+        const prompt = block.input?.prompt ?? "";
+        console.log(`> task (${desc}): ${prompt.slice(0, 80)}`);
+        output = await runSubagent(prompt);
+
+      } else {
+        const handler = TOOL_HANDLERS[block.name]
+        let output = ''
+        try {
+          output = handler ? await handler(block.input) : `Unknown tool: ${block.name}`;
+        } catch (error) {
+          output = `Error: ${error.message}`
+        }
+      }
+
 
       results.push({
         type: "tool_result",
@@ -199,6 +299,7 @@ async function main() {
     });
 
     while (await runOneTurn(messages)) {}
+
 
     const lastMessage = messages[messages.length - 1];
     const finalText = extractText(lastMessage.content);

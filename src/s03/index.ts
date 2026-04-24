@@ -1,13 +1,25 @@
-// Harness: tool dispatch -- expanding what the model can reach.
-// +----------+      +-------+      +------------------+
-// |   User   | ---> |  LLM  | ---> | Tool Dispatch    |
-// |  prompt  |      |       |      | {                |
-// +----------+      +---+---+      |   bash: run_bash |
-//                       ^          |   read: run_read |
-//                       |          |   write: run_wr  |
-//                       +----------+   edit: run_edit |
-//                       tool_result| }                |
-//                                  +------------------+
+// # Harness: planning -- keeping the model on course without scripting the route.
+// The model tracks its own progress via a TodoManager. A nag reminder
+// forces it to keep updating when it forgets.
+
+//     +----------+      +-------+      +---------+
+//     |   User   | ---> |  LLM  | ---> | Tools   |
+//     |  prompt  |      |       |      | + todo  |
+//     +----------+      +---+---+      +----+----+
+//                           ^               |
+//                           |   tool_result |
+//                           +---------------+
+//                                 |
+//                     +-----------+-----------+
+//                     | TodoManager state     |
+//                     | [ ] task A            |
+//                     | [>] task B <- doing   |
+//                     | [x] task C            |
+//                     +-----------------------+
+//                                 |
+//                     if rounds_since_todo >= 3:
+//                       inject <reminder>
+
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { exec } from "node:child_process";
@@ -27,13 +39,102 @@ const client = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL,
 });
 const MODEL = process.env.MODEL_ID!;
-const SYSTEM = `You are a coding agent at ${process.cwd()}. Use bash to inspect and change the workspace.`;
+const SYSTEM = `
+You are a coding agent working at ${process.cwd()}.
+
+For any task with more than one step:
+1. First create or update a todo list using the todo tool.
+2. Mark exactly one item as in_progress before doing work.
+3. Use available tools to inspect files, edit code, and verify results.
+4. After completing a step, update the todo list again.
+5. Do not stop after creating a todo list if work remains.
+6. Only respond with a final natural-language answer when no more tool use is needed.
+
+Prefer tools over prose.
+`;
+
 
 type Message = {
   role: "user" | "assistant";
   content: any;
 };
 
+// -- TodoManager --
+type TodoStatus = "pending" | "in_progress" | "completed";
+
+type TodoItem = {
+  id: string;
+  text: string;
+  status: TodoStatus;
+};
+
+const MARKERS: Record<TodoStatus, string> = {
+  pending: "[ ]",
+  in_progress: "[>]",
+  completed: "[x]",
+};
+
+class TodoManager {
+  private items: TodoItem[] = [];
+
+  update(items: any[]): string {
+    if (items.length > 20) {
+      throw new Error("Max 20 todos allowed");
+    }
+
+    const validated: TodoItem[] = [];
+    let inProgressCount = 0;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] ?? {};
+      const id = String(item.id ?? i + 1);
+      const text = String(item.text ?? "").trim();
+      const status = String(item.status ?? "pending").toLowerCase();
+
+      if (!text) {
+        throw new Error(`Item ${id}: text required`);
+      }
+
+      if (!["pending", "in_progress", "completed"].includes(status)) {
+        throw new Error(`Item ${id}: invalid status '${status}'`);
+      }
+
+      const todoStatus = status as TodoStatus;
+
+      if (todoStatus === "in_progress") {
+        inProgressCount++;
+      }
+
+      validated.push({ id, text, status: todoStatus });
+    }
+
+    if (inProgressCount > 1) {
+      throw new Error("Only one task can be in_progress at a time");
+    }
+
+    this.items = validated;
+    return this.render();
+  }
+
+  render(): string {
+    if (this.items.length === 0) {
+      return "No todos.";
+    }
+
+    const done = this.items.filter((t) => t.status === "completed").length;
+    return [
+      ...this.items.map((item) => `${MARKERS[item.status]} #${item.id}: ${item.text}`),
+      "",
+      `(${done}/${this.items.length} completed)`,
+    ].join("\n");
+  }
+}
+
+const TODO = new TodoManager();
+
+
+
+// -- Tool implementations --
 function safePath(p:string) {
   const resolved = path.resolve(WORKDIR, p);
   const workspace = path.resolve(WORKDIR);
@@ -124,6 +225,8 @@ const TOOLS = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
     {"name": "edit_file", "description": "Replace exact text in file.",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
+    {"name": "todo", "description": "Update task list. Track progress on multi-step tasks.",
+     "input_schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "text": {"type": "string"}, "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}}, "required": ["id", "text", "status"]}}}, "required": ["items"]}},
 ]
 
 type ToolHandler = (input: any) => Promise<string>;
@@ -132,16 +235,18 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   read_file: ({ path, limit }) => runRead(path, limit),
   write_file: ({ path, content }) => runWrite(path, content),
   edit_file: ({ path, old_text, new_text }) => runEdit(path, old_text, new_text),
+  todo: async ({ items }) => TODO.update(items),
 };
 
 
-async function runOneTurn(messages: Message[]): Promise<boolean> {
+// -- Agent loop --
+async function runOneTurn(messages: Message[],roundsSinceTodo:number): Promise<boolean> {
   const response = await client.messages.create({
     model: MODEL,
     system: SYSTEM,
     messages: messages as any,
     tools: TOOLS as any,
-    max_tokens: 2000,
+    max_tokens: 8000,
   });
 
   messages.push({
@@ -149,18 +254,33 @@ async function runOneTurn(messages: Message[]): Promise<boolean> {
     content: response.content,
   });
 
-  console.log('llm return', response);
-
-  if (response.stop_reason !== "tool_use") {
-    return false;
+  if(response.stop_reason !== "tool_use"){
+    return false
   }
 
+  console.log('llm return', response.content);
+
   const results: any[] = [];
+  let usedTodo = false
+
 
   for (const block of response.content) {
     if (block.type === "tool_use") {
       const handler = TOOL_HANDLERS[block.name]
-      const output = handler ? await handler(block.input) : `Unknown tool: ${block.name}`;
+      let output = ''
+      try {
+        output = handler ? await handler(block.input) : `Unknown tool: ${block.name}`;
+      } catch (error) {
+        output = `Error: ${error.message}`
+      }
+
+      if(block.name === 'todo') {
+        usedTodo = true
+      }
+      roundsSinceTodo = usedTodo ? 0 : roundsSinceTodo + 1;
+      if (roundsSinceTodo >= 3) {
+        results.push({ type: "text", text: "<reminder>Update your todos.</reminder>" });
+      }
 
       results.push({
         type: "tool_result",
@@ -197,8 +317,10 @@ async function main() {
       role: "user",
       content: query,
     });
+    let roundsSinceTodo = 0
 
-    while (await runOneTurn(messages)) {}
+    while (await runOneTurn(messages,roundsSinceTodo)) {}
+
 
     const lastMessage = messages[messages.length - 1];
     const finalText = extractText(lastMessage.content);
