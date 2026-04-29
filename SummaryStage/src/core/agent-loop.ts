@@ -25,6 +25,12 @@ import {
   autoCompact,
   COMPACT_THRESHOLD,
 } from "../features/compression/compression.js";
+import { withApiRetry, classifyError } from "../features/recovery/index.js";
+import {
+  createRecoveryState,
+  handleMaxTokensResponse,
+  resetOutputRecovery,
+} from "../features/recovery/index.js";
 
 // =============================================================================
 // 辅助函数
@@ -70,6 +76,9 @@ export function findLastAssistantMessage(history: any[]): any | null {
 export async function agentLoop(ctx: AgentContext): Promise<void> {
   const systemPrompt = buildSystemPrompt(ctx);
 
+  // 错误恢复状态
+  const recoveryState = createRecoveryState();
+
   // 压缩冷却：记录上次自动压缩的时间，防止短时间内重复压缩
   let lastCompactTime = 0;
   const COMPACT_COOLDOWN_MS = 10_000; // 至少 10 秒间隔
@@ -96,22 +105,57 @@ export async function agentLoop(ctx: AgentContext): Promise<void> {
       console.log(`[auto_compact skipped] cooldown not elapsed (${Math.round((COMPACT_COOLDOWN_MS - (now - lastCompactTime)) / 1000)}s remaining)`);
     }
 
-    // ===== 2. 调用 LLM =====
-    const response = await ctx.client.messages.create({
-      model: ctx.model,
-      system: systemPrompt,
-      messages: ctx.messages as any,
-      tools: ctx.toolRegistry.getDefinitions() as any,
-      max_tokens: 8000,
-    });
+    // ===== 2. 调用 LLM（带重试和错误恢复） =====
+    let response;
+    try {
+      response = await withApiRetry(() =>
+        ctx.client.messages.create({
+          model: ctx.model,
+          system: systemPrompt,
+          messages: ctx.messages as any,
+          tools: ctx.toolRegistry.getDefinitions() as any,
+          max_tokens: 8000,
+        }),
+      );
+    } catch (error: any) {
+      // 检查是否为上下文溢出
+      const classified = classifyError(error);
+      if (classified.category === "context_overflow" && !recoveryState.hasAttemptedReactiveCompact) {
+        console.log("[Recovery] Context overflow detected, triggering reactive compact...");
+        recoveryState.hasAttemptedReactiveCompact = true;
+        // 触发已有的 autoCompact
+        const compacted = await autoCompact(ctx);
+        ctx.messages.splice(0, ctx.messages.length, ...compacted);
+        lastCompactTime = Date.now();
+        continue; // 压缩后重试
+      }
+      // 其他错误直接抛出
+      throw error;
+    }
 
-    // ===== 3. 助手消息回写 =====
+    // ===== 3. 检查输出是否被截断 =====
+    if (response.stop_reason === "max_tokens") {
+      const recovery = handleMaxTokensResponse(response, recoveryState);
+      if (recovery.shouldContinue && recovery.continuationMessage) {
+        // 保存被截断的助手消息
+        ctx.messages.push({ role: "assistant", content: response.content });
+        // 注入续接请求
+        ctx.messages.push({ role: "user", content: recovery.continuationMessage });
+        continue; // 继续循环，让 LLM 续写
+      }
+      // 超过最大恢复次数，当作正常 end_turn 处理
+    }
+
+    // ===== 4. 助手消息回写 =====
     ctx.messages.push({ role: "assistant", content: response.content });
 
-    // ===== 4. 如果没有工具调用，结束本轮 =====
-    if (response.stop_reason !== "tool_use") return;
+    // ===== 5. 如果没有工具调用，结束本轮 =====
+    if (response.stop_reason === "end_turn" || response.stop_reason !== "tool_use") {
+      resetOutputRecovery(recoveryState);
+      return;
+    }
 
-    // ===== 5. 工具执行管道 =====
+    // ===== 6. 工具执行管道 =====
     const results: any[] = [];
     let manualCompact = false;
     let hasTodoCall = false;
@@ -230,6 +274,7 @@ export async function agentLoop(ctx: AgentContext): Promise<void> {
         }
       } catch (e: any) {
         output = `Error: ${e.message}`;
+        // 工具执行错误标记（Anthropic API 支持 is_error）
       }
 
       console.log(`> ${toolName}: ${String(output).slice(0, 200)}`);
@@ -258,14 +303,14 @@ export async function agentLoop(ctx: AgentContext): Promise<void> {
       });
     }
 
-    // ===== 6. Todo 提醒注入 =====
+    // ===== 7. Todo 提醒注入 =====
     // 如果有 todoManager 且本轮有 todo 工具调用，可在此注入提醒
     // （保持与原 stage1.ts 逻辑一致：预留扩展点）
 
-    // ===== 7. 结果回写 =====
+    // ===== 8. 结果回写 =====
     ctx.messages.push({ role: "user", content: results });
 
-    // ===== 8. 手动压缩处理 =====
+    // ===== 9. 手动压缩处理 =====
     if (manualCompact) {
       console.log("[manual compact]");
       const compacted = await autoCompact(ctx);

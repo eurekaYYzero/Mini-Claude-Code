@@ -14,7 +14,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
     "dotenv": "^17.4.2",
-    "js-yaml": "^4.1.1"
+    "js-yaml": "^4.1.1",
+    "p-retry": "^8.0.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

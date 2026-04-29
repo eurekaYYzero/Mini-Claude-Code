@@ -14,16 +14,7 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
-      js-yaml:
-        specifier: ^4.1.1
-        version: 4.1.1
-      p-retry:
-        specifier: ^8.0.0
-        version: 8.0.0
     devDependencies:
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
       '@types/node':
         specifier: ^25.6.0
         version: 25.6.0
@@ -205,14 +196,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@types/js-yaml@4.0.9':
-    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==, tarball: https://registry.anpm.alibaba-inc.com/@types/js-yaml/-/js-yaml-4.0.9.tgz}
-
   '@types/node@25.6.0':
     resolution: {integrity: sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ==, tarball: https://registry.anpm.alibaba-inc.com/@types/node/-/node-25.6.0.tgz}
-
-  argparse@2.0.1:
-    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==, tarball: https://registry.anpm.alibaba-inc.com/argparse/-/argparse-2.0.1.tgz}
 
   dotenv@17.4.2:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==, tarball: https://registry.anpm.alibaba-inc.com/dotenv/-/dotenv-17.4.2.tgz}
@@ -231,21 +216,9 @@ packages:
   get-tsconfig@4.14.0:
     resolution: {integrity: sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA==, tarball: https://registry.anpm.alibaba-inc.com/get-tsconfig/-/get-tsconfig-4.14.0.tgz}
 
-  is-network-error@1.3.1:
-    resolution: {integrity: sha512-6QCxa49rQbmUWLfk0nuGqzql9U8uaV2H6279bRErPBHe/109hCzsLUBUHfbEtvLIHBd6hyXbgedBSHevm43Edw==, tarball: https://registry.anpm.alibaba-inc.com/is-network-error/-/is-network-error-1.3.1.tgz}
-    engines: {node: '>=16'}
-
-  js-yaml@4.1.1:
-    resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==, tarball: https://registry.anpm.alibaba-inc.com/js-yaml/-/js-yaml-4.1.1.tgz}
-    hasBin: true
-
   json-schema-to-ts@3.1.1:
     resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==, tarball: https://registry.anpm.alibaba-inc.com/json-schema-to-ts/-/json-schema-to-ts-3.1.1.tgz}
     engines: {node: '>=16'}
-
-  p-retry@8.0.0:
-    resolution: {integrity: sha512-kFVqH1HxOHp8LupNsOys7bSV09VYTRLxarH/mokO4Rqhk6wGi70E0jh4VzvVGXfEVNggHoHLAMWsQqHyU1Ey9A==, tarball: https://registry.anpm.alibaba-inc.com/p-retry/-/p-retry-8.0.0.tgz}
-    engines: {node: '>=22'}
 
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==, tarball: https://registry.anpm.alibaba-inc.com/resolve-pkg-maps/-/resolve-pkg-maps-1.0.0.tgz}
@@ -352,13 +325,9 @@ snapshots:
   '@esbuild/win32-x64@0.27.7':
     optional: true
 
-  '@types/js-yaml@4.0.9': {}
-
   '@types/node@25.6.0':
     dependencies:
       undici-types: 7.19.2
-
-  argparse@2.0.1: {}
 
   dotenv@17.4.2: {}
 
@@ -398,20 +367,10 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
-  is-network-error@1.3.1: {}
-
-  js-yaml@4.1.1:
-    dependencies:
-      argparse: 2.0.1
-
   json-schema-to-ts@3.1.1:
     dependencies:
       '@babel/runtime': 7.29.2
       ts-algebra: 2.0.0
-
-  p-retry@8.0.0:
-    dependencies:
-      is-network-error: 1.3.1
 
   resolve-pkg-maps@1.0.0: {}
 
