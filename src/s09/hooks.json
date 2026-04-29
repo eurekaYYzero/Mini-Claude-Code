@@ -1,0 +1,58 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "command": "node -e \"console.error('SessionStart 注入消息：hooks 已加载'); process.exit(2)\""
+      },
+      {
+        "matcher": "*",
+        "command": "node -e \"console.log(JSON.stringify({ additionalContext: 'SessionStart additionalContext from stdout JSON', permissionDecision: { allow: true, source: 'session-start' } })); process.exit(0)\""
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "read_file",
+        "command": "node -e \"const input = JSON.parse(process.env.HOOK_TOOL_INPUT || '{}'); if (input.path === 'package.json') { console.log(JSON.stringify({ updatedInput: { path: 'package.json', limit: 20 }, additionalContext: '已自动为 package.json 增加 limit=20', permissionDecision: { allow: true, rewritten: true } })); } process.exit(0)\""
+      },
+      {
+        "matcher": "write_file",
+        "command": "node -e \"const input = JSON.parse(process.env.HOOK_TOOL_INPUT || '{}'); if (String(input.path || '').includes('blocked')) { console.error('禁止写入包含 blocked 的文件名'); process.exit(1); } process.exit(0)\""
+      },
+      {
+        "matcher": "bash",
+        "command": "node -e \"const input = JSON.parse(process.env.HOOK_TOOL_INPUT || '{}'); const cmd = String(input.command || ''); if (cmd.includes('rm -rf')) { console.error('检测到危险命令 rm -rf，已阻止'); process.exit(1); } if (cmd.includes('ls')) { console.error('执行 ls 前提示：请注意输出可能较长'); process.exit(2); } process.exit(0)\""
+      },
+      {
+        "matcher": "edit_file",
+        "command": "node -e \"console.log(JSON.stringify({ additionalContext: 'edit_file 前置检查通过' })); process.exit(0)\""
+      },
+      {
+        "matcher": "*",
+        "command": "node -e \"process.exit(0)\""
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "read_file",
+        "command": "node -e \"console.error('read_file 已完成：请检查是否包含敏感信息'); process.exit(2)\""
+      },
+      {
+        "matcher": "write_file",
+        "command": "node -e \"const out = String(process.env.HOOK_TOOL_OUTPUT || ''); if (out.startsWith('Wrote')) { console.log(JSON.stringify({ additionalContext: 'write_file 成功完成（来自 PostToolUse JSON）', permissionDecision: { audited: true } })); } process.exit(0)\""
+      },
+      {
+        "matcher": "bash",
+        "command": "node -e \"const out = String(process.env.HOOK_TOOL_OUTPUT || ''); if (out.startsWith('Error:')) { console.error('bash 执行后发现错误输出'); process.exit(2); } process.exit(0)\""
+      },
+      {
+        "matcher": "edit_file",
+        "command": "node -e \"console.error('edit_file 已执行，但被标记为需要人工复核'); process.exit(1)\""
+      },
+      {
+        "matcher": "*",
+        "command": "node -e \"process.exit(0)\""
+      }
+    ]
+  }
+}
