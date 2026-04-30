@@ -21,7 +21,7 @@ async function main() {
   });
 
   // 启用所有功能
-  agent.enableTodo();
+  agent.enableTask();
   await agent.enableSkills(path.join(process.cwd(), "skills"));
   agent.enableSubagent();
   agent.enableCompression();

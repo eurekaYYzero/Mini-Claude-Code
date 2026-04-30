@@ -33,7 +33,7 @@ export interface AgentContext {
 
   // ----- 可选功能模块引用（后续模块注册时赋值） -----
   /** 任务管理器 */
-  todoManager?: any;       // 后续由 TodoManager 类型替换
+  taskManager?: import("../features/task/task-manager.js").TaskManager;
   /** 技能加载器 */
   skillLoader?: any;       // 后续由 SkillLoader 类型替换
   /** 钩子管理器 */

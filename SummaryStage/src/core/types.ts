@@ -22,18 +22,10 @@ export interface Message {
 }
 
 // =============================================================================
-// Todo 相关类型
+// Task 相关类型（re-export from features/task）
 // =============================================================================
 
-/** 任务状态 */
-export type TodoStatus = "pending" | "in_progress" | "completed";
-
-/** 单个待办项 */
-export interface TodoItem {
-  id: string;
-  text: string;
-  status: TodoStatus;
-}
+export type { TaskStatus, Task } from "../features/task/task-manager.js";
 
 // =============================================================================
 // 技能系统相关类型

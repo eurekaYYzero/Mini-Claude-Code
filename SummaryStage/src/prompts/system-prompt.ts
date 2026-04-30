@@ -130,7 +130,6 @@ function buildDynamicContext(ctx: AgentContext): string {
  * - 包含工作目录信息、能力概述、任务管理流程说明
  * - 如果 ctx.toolRegistry 中有注册工具，追加详细工具列表
  * - 如果 ctx.skillLoader 存在，追加技能元数据列表
- * - 如果 ctx.todoManager 存在，追加任务管理相关指引
  * - 如果 ctx.memoryManager 存在，注入持久记忆和保存指引
  * - 如果存在 CLAUDE.md 配置文件，注入链式加载的指令
  * - 尾部附加动态运行时上下文（日期、平台、模型）
@@ -154,7 +153,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
   sections.push(`CAPABILITIES:
 - Run shell commands via bash
 - Read, write, and edit files (path safety enforced)
-- Track multi-step tasks with the todo tool (update progress as you work)
+- Track multi-step tasks with task management tools (task_create, task_get, task_update, task_list)
 - Delegate subtasks to subagents via the task tool (they work independently with fresh context)
 - Load specialized skill knowledge via load_skill
 - Manually compress conversation context via compact
@@ -166,16 +165,35 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     sections.push(toolListing);
   }
 
-  // 任务管理指引（如果 todoManager 存在）
-  if (ctx.todoManager) {
-    sections.push(`TASK MANAGEMENT:
-For any task with more than one step:
-1. First create or update a todo list using the todo tool.
-2. Mark exactly one item as in_progress before doing work.
-3. Use available tools to inspect files, edit code, and verify results.
-4. After completing a step, update the todo list again.
-5. Do not stop after creating a todo list if work remains.
-6. Only respond with a final natural-language answer when no more tool use is needed.`);
+  // 任务管理指引（如果 taskManager 存在）
+  if (ctx.taskManager) {
+    sections.push(`## Task Management
+
+You have access to task management tools for tracking multi-step work:
+
+- **task_create**: Create a new task with subject and description. Optionally specify blockedBy to set dependencies.
+- **task_get**: Get full details of a specific task by ID.
+- **task_update**: Update task status, add dependencies, or modify metadata. When you complete a task, dependent tasks are automatically unblocked.
+- **task_list**: List all tasks with their current status and dependency info.
+
+### Workflow
+1. Break complex work into tasks using task_create
+2. Set dependencies with blockedBy to establish execution order
+3. Mark tasks as in_progress before starting work
+4. Mark tasks as completed when done (blocked tasks auto-unblock)
+5. Use task_list to check progress and find ready tasks
+
+### Status Values
+- pending: Not yet started
+- in_progress: Currently being worked on
+- completed: Successfully finished
+- failed: Could not be completed`);
+
+    // 动态注入当前任务状态
+    const stats = ctx.taskManager.getStats();
+    if (stats.total > 0) {
+      sections.push(`\n## Current Task Status\n${ctx.taskManager.render()}`);
+    }
   }
 
   // 技能列表（如果 skillLoader 存在）

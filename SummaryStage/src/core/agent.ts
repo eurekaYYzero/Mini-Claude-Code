@@ -16,7 +16,7 @@ import path from "node:path";
 import { createAgentContext } from "./context.js";
 import type { AgentContext } from "./context.js";
 import { registerBaseTools } from "../tools/index.js";
-import { registerTodoFeature } from "../features/todo/index.js";
+import { registerTaskFeature } from "../features/task/index.js";
 import { registerSkillsFeature } from "../features/skills/index.js";
 import { registerSubagentFeature } from "../features/subagent/index.js";
 import { registerCompressionFeature } from "../features/compression/index.js";
@@ -60,10 +60,10 @@ export class Agent {
   }
 
   /**
-   * 启用 Todo 任务管理功能。
+   * 启用 Task 任务管理功能。
    */
-  enableTodo(): void {
-    registerTodoFeature(this.ctx);
+  enableTask(): void {
+    registerTaskFeature(this.ctx);
   }
 
   /**

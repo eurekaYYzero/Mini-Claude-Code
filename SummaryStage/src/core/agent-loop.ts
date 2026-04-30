@@ -11,7 +11,7 @@
  *   2. 调用 LLM 获取响应
  *   3. 助手消息回写
  *   4. 工具执行管道（hooks → permissions → handler）
- *   5. Todo 提醒注入
+ *   5. Task 状态注入
  *   6. 结果回写
  *   7. 手动压缩处理
  */
@@ -158,7 +158,7 @@ export async function agentLoop(ctx: AgentContext): Promise<void> {
     // ===== 6. 工具执行管道 =====
     const results: any[] = [];
     let manualCompact = false;
-    let hasTodoCall = false;
+    let hasTaskCall = false;
 
     for (const block of response.content) {
       if (block.type !== "tool_use") continue;
@@ -268,9 +268,9 @@ export async function agentLoop(ctx: AgentContext): Promise<void> {
           }
         }
 
-        // 标记 todo 工具调用
-        if (toolName === "todo") {
-          hasTodoCall = true;
+        // 标记 task 工具调用
+        if (toolName.startsWith("task_")) {
+          hasTaskCall = true;
         }
       } catch (e: any) {
         output = `Error: ${e.message}`;
@@ -303,9 +303,18 @@ export async function agentLoop(ctx: AgentContext): Promise<void> {
       });
     }
 
-    // ===== 7. Todo 提醒注入 =====
-    // 如果有 todoManager 且本轮有 todo 工具调用，可在此注入提醒
-    // （保持与原 stage1.ts 逻辑一致：预留扩展点）
+    // ===== 7. Task 状态注入 =====
+    if (ctx.taskManager && hasTaskCall) {
+      const taskSummary = ctx.taskManager.render();
+      // 将任务状态作为提醒附加到结果中
+      if (taskSummary && taskSummary !== "No tasks.") {
+        results.push({
+          type: "tool_result",
+          tool_use_id: "task_status_reminder",
+          content: `[Task Status]\n${taskSummary}`,
+        });
+      }
+    }
 
     // ===== 8. 结果回写 =====
     ctx.messages.push({ role: "user", content: results });
