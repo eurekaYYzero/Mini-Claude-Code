@@ -7,6 +7,7 @@
  */
 
 import dotenv from "dotenv";
+import os from "node:os";
 import path from "node:path";
 import { Agent } from "./core/agent.js";
 
@@ -22,7 +23,7 @@ async function main() {
 
   // 启用所有功能
   agent.enableTask();
-  await agent.enableSkills(path.join(process.cwd(), "skills"));
+  await agent.enableSkills(path.join(os.homedir(), ".agents", "skills"));
   agent.enableSubagent();
   agent.enableCompression();
   agent.enablePermissions();  // 默认 "default" 模式
